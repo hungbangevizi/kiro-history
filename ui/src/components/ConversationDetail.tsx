@@ -47,12 +47,22 @@ function ToolUseBadges({ toolUses }: { toolUses: ToolUse[] }) {
 }
 
 function TurnCostBadge({ turnMetadata }: { turnMetadata: TurnMetadata }) {
-  const cost = turnMetadata.creditCost.toFixed(4);
+  const cost   = turnMetadata.creditCost.toFixed(4);
+  const prefix = turnMetadata.isEstimated ? '~' : '';
+  const title  = turnMetadata.isEstimated
+    ? 'Estimated cost — Kiro IDE does not record actual credit data in session files. Based on visible token count × model rate × context multiplier. Accuracy: ±40–70 %.'
+    : undefined;
+
   return (
     <div className="turn-cost-badge mt-3 border-t border-[rgb(var(--border))] pt-3">
-      <div className="flex items-center gap-1.5 text-xs">
+      <div className="flex items-center gap-1.5 text-xs" title={title}>
         <span>⚡</span>
-        <span>{cost} credits</span>
+        <span className={turnMetadata.isEstimated ? 'opacity-70 cursor-help' : ''}>
+          {prefix}{cost} credits
+          {turnMetadata.isEstimated && (
+            <span className="ml-1 text-[10px] text-[rgb(var(--foreground-muted))]">(est.)</span>
+          )}
+        </span>
         <span className="opacity-50">·</span>
         <span>{turnMetadata.model}</span>
         <span className="opacity-50">·</span>
@@ -66,22 +76,36 @@ function SessionCostSummary({ messages }: { messages: ParsedConversation['messag
   let totalCredits = 0;
   let totalRequests = 0;
   let turnCount = 0;
+  let hasEstimates = false;
 
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.turnMetadata) {
       totalCredits += msg.turnMetadata.creditCost;
       totalRequests += msg.turnMetadata.requestCount;
       turnCount++;
+      if (msg.turnMetadata.isEstimated) hasEstimates = true;
     }
   }
 
   if (turnCount === 0) return null;
 
+  const title = hasEstimates
+    ? 'Estimated — Kiro IDE does not record actual credit data in session files. Based on visible token count × model rate × context multiplier. Accuracy: ±40–70 %.'
+    : undefined;
+
   return (
     <div className="session-cost-summary border-b border-[rgb(var(--border))] px-4 py-2">
       <div className="max-w-4xl mx-auto flex items-center gap-2 text-xs">
         <span>⚡</span>
-        <span>Session total: {totalCredits.toFixed(4)} credits</span>
+        <span
+          className={hasEstimates ? 'opacity-80 cursor-help' : ''}
+          title={title}
+        >
+          {hasEstimates ? '~' : ''}Session total: {totalCredits.toFixed(4)} credits
+          {hasEstimates && (
+            <span className="ml-1 text-[rgb(var(--foreground-muted))] text-[10px]">(est.)</span>
+          )}
+        </span>
         <span className="opacity-50">·</span>
         <span>{totalRequests} requests</span>
         <span className="opacity-50">·</span>

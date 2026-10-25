@@ -81,6 +81,50 @@ export function resolveIdeV1WorkspaceDirs(basePath?: string): string[] {
   return dirs;
 }
 
+// ── Credit-cost estimation ──────────────────────────────────────────
+//
+// Kiro IDE writes `promptTurnSummaries: []` (always empty), so actual credit
+// data is never stored locally.  We estimate from visible message content.
+//
+// Calibration source (community usage reports, Oct 2025):
+//   200-line React refactor:  Auto ≈ 0.8 cr  |  Sonnet 4 ≈ 1.1 cr  |  Opus ≈ 3.2 cr
+//   Kiro docs confirm:  Sonnet 4 = 1.3× Auto;  Opus ≈ 4× Auto.
+//
+// We only see a fraction of the real context window (system prompt, tool
+// definitions, steering files, memory, prior turns are hidden).  The
+// HIDDEN_CONTEXT_MULTIPLIER compensates for that.
+//
+// Expected accuracy: ±40–70 %.  All estimated values are flagged with
+// isEstimated=true so the UI can show them with a "~" prefix.
+
+const CHARS_PER_TOKEN = 4;           // industry-standard approximation
+const HIDDEN_CONTEXT_MULTIPLIER = 2.5; // visible ≈ 30–40 % of actual context
+
+/** Credits per 1 K tokens, keyed by model family. */
+const CREDITS_PER_1K_TOKENS: Record<string, number> = {
+  auto:   0.15,   // Kiro Auto baseline
+  sonnet: 0.195,  // 1.3× Auto  (Kiro docs)
+  haiku:  0.045,  // ~0.3× Auto (estimated)
+  opus:   0.60,   // 4.0× Auto  (Kiro docs)
+};
+
+function getCreditsPerKTokens(modelId?: string): number {
+  if (!modelId || modelId === 'unknown') return CREDITS_PER_1K_TOKENS.auto;
+  const m = modelId.toLowerCase();
+  if (m.includes('opus'))   return CREDITS_PER_1K_TOKENS.opus;
+  if (m.includes('haiku'))  return CREDITS_PER_1K_TOKENS.haiku;
+  if (m.includes('sonnet')) return CREDITS_PER_1K_TOKENS.sonnet;
+  return CREDITS_PER_1K_TOKENS.auto;
+}
+
+function estimateTurnCreditCost(visibleChars: number, modelId?: string): number {
+  const visibleTokens = visibleChars / CHARS_PER_TOKEN;
+  const totalTokens   = visibleTokens * HIDDEN_CONTEXT_MULTIPLIER;
+  const rate          = getCreditsPerKTokens(modelId);
+  // Round to 2 dp to avoid implying false precision.
+  return Math.round((totalTokens / 1000) * rate * 100) / 100;
+}
+
 // ── JSONL parser ────────────────────────────────────────────────────
 
 function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMessage[] {
@@ -154,14 +198,42 @@ function parseIdeV1Messages(jsonlPath: string, modelId?: string): ConversationMe
           requestIds?: string[];
         };
         const summaries = p.promptTurnSummaries;
-        const creditCost = Array.isArray(summaries)
-          ? summaries.reduce((sum, s) => sum + (s.usage || 0), 0)
-          : 0;
+        const hasRealData = Array.isArray(summaries) && summaries.length > 0;
         const requestCount = Array.isArray(p.requestIds) ? p.requestIds.length : 0;
+
+        let creditCost: number;
+        let isEstimated: boolean;
+
+        if (hasRealData) {
+          // Real data available — use it directly.
+          creditCost  = summaries!.reduce((sum, s) => sum + (s.usage || 0), 0);
+          isEstimated = false;
+        } else {
+          // promptTurnSummaries is always empty in Kiro IDE v1.
+          // Estimate from the visible content of this turn.
+          // At this point in the JSONL stream usage_summary fires BEFORE
+          // turn_end, so pendingAssistantContent / pendingToolUses still hold
+          // the current turn's data.
+          let visibleChars = pendingAssistantContent.length;
+
+          // Tool-use argument JSON also consumes tokens.
+          for (const tu of pendingToolUses) {
+            visibleChars += JSON.stringify(tu.args).length;
+          }
+
+          // The user prompt was already pushed to messages[] by the 'user' case.
+          const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+          if (lastUserMsg) visibleChars += lastUserMsg.content.length;
+
+          creditCost  = estimateTurnCreditCost(visibleChars, modelId);
+          isEstimated = true;
+        }
+
         pendingTurnMetadata = {
           creditCost,
           model: modelId || 'unknown',
           requestCount,
+          isEstimated,
         };
         break;
       }

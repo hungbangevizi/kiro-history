@@ -2,9 +2,13 @@ import { useState, useEffect } from 'react';
 import { useConversations } from './hooks/useConversations';
 import { ConversationList } from './components/ConversationList';
 import { ConversationDetail } from './components/ConversationDetail';
+import { Dashboard } from './components/Dashboard';
 import { SearchBar } from './components/SearchBar';
-import { Terminal, Sparkles, Loader2, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, Copy, Check, TerminalSquare } from 'lucide-react';
+import { Terminal, Sparkles, Loader2, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2, Copy, Check, TerminalSquare, Download, LayoutDashboard, MessageSquare } from 'lucide-react';
 import type { ParsedConversation } from './types';
+import { exportConversationsToExcel } from './lib/export';
+
+type AppView = 'conversations' | 'dashboard';
 
 export function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -16,6 +20,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<AppView>('conversations');
   const { conversations, loading } = useConversations(currentSource || undefined);
 
   // Keep the detail pane in sync when live updates refresh the conversations list.
@@ -107,15 +112,47 @@ export function App() {
       {!fullscreen && (
         <header className="flex items-center gap-4 px-4 py-3 border-b border-[rgb(var(--border))] bg-[rgb(var(--background-card))]">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
-              title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-              aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-            >
-              {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-            </button>
+            {/* Sidebar toggle — only relevant in conversations view */}
+            {view === 'conversations' && (
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
+                title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+                aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+              </button>
+            )}
             <span className="font-semibold text-[rgb(var(--foreground))]">Kiro History</span>
+
+            {/* View toggle: Conversations | Dashboard */}
+            <div className="flex items-center p-0.5 rounded-md bg-[rgb(var(--background))] border border-[rgb(var(--border))]">
+              <button
+                onClick={() => setView('conversations')}
+                title="Browse conversations"
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  view === 'conversations'
+                    ? 'bg-cyan-600/20 text-cyan-400'
+                    : 'text-[rgb(var(--foreground-muted))] hover:text-[rgb(var(--foreground))]'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                Conversations
+              </button>
+              <button
+                onClick={() => setView('dashboard')}
+                title="Usage dashboard"
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  view === 'dashboard'
+                    ? 'bg-cyan-600/20 text-cyan-400'
+                    : 'text-[rgb(var(--foreground-muted))] hover:text-[rgb(var(--foreground))]'
+                }`}
+              >
+                <LayoutDashboard className="w-3 h-3" />
+                Dashboard
+              </button>
+            </div>
+
             {/* Source: segmented toggle when both are available, static badge otherwise */}
             {currentSource && canSwitch && (
               <div
@@ -164,54 +201,69 @@ export function App() {
               </div>
             )}
           </div>
-          <SearchBar
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search conversations..."
-          />
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[rgb(var(--foreground-muted))] whitespace-nowrap">
-              {conversations.length} conversations
-            </span>
-            {selectedConversation && (
-              <>
+
+          {/* Search + right-side actions — only in conversations view */}
+          {view === 'conversations' && (
+            <>
+              <SearchBar
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Search conversations..."
+              />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[rgb(var(--foreground-muted))] whitespace-nowrap">
+                  {conversations.length} conversations
+                </span>
                 <button
-                  onClick={handleCopy}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
-                    copied
-                      ? 'border-green-500/40 bg-green-500/15 text-green-400'
-                      : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 hover:border-cyan-400/60'
-                  }`}
-                  title={canResume ? `Copy resume command: ${resumeCommand}` : 'Copy directory path'}
+                  onClick={() => exportConversationsToExcel(filteredConversations, currentSource ?? 'cli')}
+                  disabled={filteredConversations.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-xs font-medium hover:bg-emerald-500/20 hover:border-emerald-400/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={`Export ${filteredConversations.length} conversation${filteredConversations.length !== 1 ? 's' : ''} to Excel`}
                 >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Copied!
-                    </>
-                  ) : canResume ? (
-                    <>
-                      <TerminalSquare className="w-3.5 h-3.5" />
-                      Copy resume command
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      Copy path
-                    </>
-                  )}
+                  <Download className="w-3.5 h-3.5" />
+                  Export
                 </button>
-                <button
-                  onClick={() => setFullscreen(true)}
-                  className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
-                  title="Fullscreen"
-                  aria-label="Enter fullscreen mode"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
+                {selectedConversation && (
+                  <>
+                    <button
+                      onClick={handleCopy}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+                        copied
+                          ? 'border-green-500/40 bg-green-500/15 text-green-400'
+                          : 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 hover:border-cyan-400/60'
+                      }`}
+                      title={canResume ? `Copy resume command: ${resumeCommand}` : 'Copy directory path'}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          Copied!
+                        </>
+                      ) : canResume ? (
+                        <>
+                          <TerminalSquare className="w-3.5 h-3.5" />
+                          Copy resume command
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          Copy path
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setFullscreen(true)}
+                      className="p-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--background))] hover:bg-[rgb(var(--background-hover))] text-[rgb(var(--foreground))] transition-colors"
+                      title="Fullscreen"
+                      aria-label="Enter fullscreen mode"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </header>
       )}
 
@@ -229,15 +281,21 @@ export function App() {
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">
-        {!sidebarCollapsed && !fullscreen && (
-          <ConversationList
-            conversations={filteredConversations}
-            loading={false}
-            selectedPath={selectedConversation?.conversationId}
-            onSelect={setSelectedConversation}
-          />
+        {view === 'dashboard' ? (
+          <Dashboard conversations={conversations} />
+        ) : (
+          <>
+            {!sidebarCollapsed && !fullscreen && (
+              <ConversationList
+                conversations={filteredConversations}
+                loading={false}
+                selectedPath={selectedConversation?.conversationId}
+                onSelect={setSelectedConversation}
+              />
+            )}
+            <ConversationDetail conversation={selectedConversation} searchQuery={searchQuery} />
+          </>
         )}
-        <ConversationDetail conversation={selectedConversation} searchQuery={searchQuery} />
       </main>
     </div>
   );

@@ -36,9 +36,10 @@ export interface ToolUse {
 
 // Turn metadata (credit cost, model, request count)
 export interface TurnMetadata {
-  creditCost: number;       // sum of metering_usage[].value
+  creditCost: number;       // sum of metering_usage[].value, or an estimate when isEstimated=true
   model: string;            // model ID ("auto", "claude-sonnet-4.6", etc.)
   requestCount: number;     // total_request_count
+  isEstimated?: boolean;    // true when creditCost was derived from message-content heuristics
 }
 
 // Individual message in a conversation
