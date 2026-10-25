@@ -127,6 +127,80 @@ When using `--source auto` (the default):
 3. If only one exists, uses that source
 4. Shows a switch button in the UI when both sources are available
 
+## 💰 Credit Estimation (IDE sessions)
+
+Kiro IDE does **not** write credit data into local session files — the `promptTurnSummaries` field inside every `usage_summary` JSONL payload is always an empty array `[]`. When you view IDE sessions, kiro-history **estimates** the credit cost from the visible message content and flags every estimated figure with a `~` prefix and an `(est.)` badge in the UI.
+
+> **CLI sessions** always show real credit data (read from `metering_usage` in the session JSON). No estimation is applied.
+
+### Formula
+
+```
+estimated_credits = round(visible_tokens × context_multiplier / 1000 × rate, 2)
+
+where:
+  visible_tokens    = visible_chars / 4
+  visible_chars     = user_prompt.length + assistant_response.length + tool_args_json.length
+  context_multiplier = 2.5
+  rate              = credits per 1 K tokens (model-dependent, see table below)
+```
+
+#### Why the 2.5× multiplier?
+
+The session file only contains the messages you can see. Every real LLM request also includes content that never appears in the file:
+
+- System prompt and agent instructions
+- Tool definitions (all available tools are sent on every request)
+- Steering / memory files included in context
+- Prior conversation turns (context window accumulation)
+
+Visible content typically represents only **30–40 %** of the tokens actually sent to the model. The `2.5×` multiplier compensates for this gap. It is a conservative midpoint — heavy tool-use sessions may still be underestimated.
+
+### Model rates
+
+| Model family | Credits / 1 K tokens | vs Auto |
+|---|---|---|
+| **Auto** (Kiro default) | 0.15 | 1.0× baseline |
+| **Claude Sonnet 4.x** | 0.195 | 1.3× — confirmed in [Kiro pricing docs](https://kiro.dev/blog/new-pricing-plans-and-auto/) |
+| **Claude Opus 4.x** | 0.60 | 4.0× — confirmed in Kiro pricing docs |
+| **Claude Haiku 3.x** | 0.045 | ~0.3× — estimated |
+
+### Calibration source
+
+Rates are calibrated against [community usage benchmarks (Oct 2025)](https://note.com/ai_tech_notes/n/n88fe8fde9d13):
+
+| Task | Auto | Sonnet 4 | Opus 4 |
+|---|---|---|---|
+| Refactor 200-line React component + add TypeScript types | ~0.8 cr | ~1.1 cr | ~3.2 cr |
+
+The Sonnet 4 (1.3×) and Opus (4.0×) multipliers are independently confirmed by the official Kiro documentation.
+
+### Accuracy
+
+**Expected accuracy: ±40–70 %**
+
+| Error source | Typical impact |
+|---|---|
+| Prompt caching (Kiro caches aggressively) | ±30–50 % |
+| Auto mode sub-model selection per request | ±20–30 % |
+| Context window accumulation across long sessions | ±10–30 % |
+| Character → token approximation (4 chars/token) | ±10–15 % |
+
+The estimates are useful as **order-of-magnitude indicators** — they tell you which sessions and prompts are expensive relative to each other. Do not use them for billing or budgeting decisions; check your actual credit balance in the Kiro IDE or subscription dashboard.
+
+### Example calculation
+
+A turn where the user sends a 500-character prompt and the assistant responds with 2 000 characters, using 3 tool calls totalling 800 characters of JSON args:
+
+```
+visible_chars  = 500 + 2 000 + 800 = 3 300
+visible_tokens = 3 300 / 4         = 825
+total_tokens   = 825 × 2.5         = 2 062.5
+credits (Auto) = 2 062.5 / 1000 × 0.15 = 0.31  → displayed as ~0.31 (est.)
+```
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
